@@ -186,22 +186,14 @@ pnpm dev                                    # http://localhost:3000
 | `NEXT_PUBLIC_COINFLIP_ADDRESS` | public | Overrides the address in `deployments.json`. |
 | `NEXT_PUBLIC_RPC_URL`, `NEXT_PUBLIC_DEV_PRIVATE_KEY` | dev only | Local anvil fork + a wallet-less burner connector. Ignored in production builds. |
 
-### 3.3 Deploy to Vercel
-
-1. Import the repo, set **Root Directory** to `web`.
-2. Add `RELAYER_PRIVATE_KEY` and `CRON_SECRET` as environment variables.
-3. `web/vercel.json` registers `/api/sweep` every minute. Hobby plans run crons at most daily, which is
-   fine for a testnet demo since the client nudge does most of the work.
-4. Fund the relayer address and watch `/api/sweep` output for `"low": true`.
-
-### 3.4 Standalone relayer (optional)
+### 3.3 Standalone relayer (optional)
 
 ```bash
 cp relayer/.env.example relayer/.env        # RELAYER_PRIVATE_KEY, COINFLIP_ADDRESS
 pnpm relayer
 ```
 
-### 3.5 Fully local, no testnet ETH
+### 3.4 Fully local, no testnet ETH
 
 ```bash
 anvil --fork-url https://rpc.testnet.chain.robinhood.com --hardfork prague
@@ -251,89 +243,48 @@ cast call $CF 'bounded(bytes32,uint256)(uint256)' 0x<seed> 2 --rpc-url $RPC   # 
 
 ## 5. Considerations and open questions before you integrate
 
-These are the things we had to get clear on. Most come straight from
-[`docs/integration-notes.md`](docs/integration-notes.md), which is the security-review write-up this
-integration follows; read it in full before shipping anything with value.
+Everything below is covered in depth in [`docs/integration-notes.md`](docs/integration-notes.md). Read it
+in full before shipping anything with value at stake. The short version:
 
-### 5.1 It is not a VRF, so liveness is your problem
+**Nobody answers your request.** There is no callback. If no one imports the target round, the
+commitment stays pending forever. Decide who runs and funds your relayer, and what happens to a
+commitment nobody settles. Any escape hatch must be non-user-triggerable and outcome-independent.
 
-Nobody answers your request. If no one imports the target round, the commitment stays pending forever.
-That is why this repo has three settlement paths, and why the contract emits
-`QuicknetRandomnessRequested`. **Questions:** who runs your relayer, who funds it, and what happens to a
-commitment nobody ever settles? If you need an escape hatch it must be non-user-triggerable and
-outcome-independent, otherwise it is a free reroll.
+**The lead is the only security parameter.** A round's beacon is public at a known wall-clock time,
+but your contract measures the lead against `block.timestamp`, which the sequencer may run behind.
+If the chain lags more than `(LEAD_ROUNDS − 1) · 3` s, the beacon is already public when the commit
+lands and an attacker can commit only on wins. We use 4 rounds for a no-value demo; use **≥ 10** with
+money on it and size for the worst observed lag, not the median. `minimumLeadRounds()` is advisory,
+the registry does not enforce it.
 
-### 5.2 The lead is the whole security parameter
+**Derive the round from the clock, never from the registry.** Submission is permissionless, so an
+adversary controls which rounds are stored and when. Never choose "the latest stored round" or fall
+back to `R+1` when `R` is missing. Settle from exactly the committed round or stay pending.
 
-The beacon for round `R` is public at `genesis + (R-1)·3`. The only thing between "committed" and
-"knowable" is `LEAD_ROUNDS` measured against the **chain's clock**, not wall-clock. Arbitrum-family
-sequencers may run `block.timestamp` up to 24 h behind real time. If the chain lags more than
-`(LEAD_ROUNDS − 1)·3` seconds, the beacon is already on `api.drand.sh` when the commit lands and an attacker
-can compute the outcome first and only commit on wins (risk-free via a wrapper that reverts otherwise).
+**No selective abort.** Once committed, the user must not be able to cancel or refund after the
+result is knowable.
 
-- Testnet registry `minimumLeadRounds() = 3` (6–9 s). We use **4** for a no-value demo. Measured lag on
-  Robinhood testnet was ~1 s while we built this.
-- Use **≥ 10 rounds (≥ 27 s)** for anything with money on it, enforce the floor in your constructor, and size
-  for the *tail* (sequencer stalls and restarts), not the median.
-- `minimumLeadRounds()` is declared by the registry but **not enforced** by `submitBeacon`. It is a hint for you.
+**Pin inputs and separate seeds.** Fix every outcome-affecting input at commit and read it from storage
+at settle. Seeds must include a purpose tag, `block.chainid`, `address(this)`, the commitment id and the
+draw index, because the same beacon is stored identically on every chain. Draw bounded values with
+rejection sampling, not `seed % n`.
 
-**Questions:** what is the observed and worst-case timestamp lag on your chain? Is a 30 s wait acceptable
-in your UX? (The wait is per commitment, so you can commit N draws to one round and reveal them instantly.)
+**Someone pays ~680k gas per round import.** Later readers pay two SLOADs. Decide whether the player,
+your relayer, or both pay, and what happens when the relayer wallet runs dry. This app falls back to the
+user's wallet.
 
-### 5.3 Never pick a round from what the registry has
+**Relayer details that bit us.** One key cannot send concurrent transactions, so serialize or retry on
+nonce errors; simulate first and treat `AlreadySettled` as success; keep a fallback drand mirror
+(`api2.drand.sh`, `api3.drand.sh`); gate on `gasleft()` before any external call whose failure you catch.
 
-Submission is permissionless and optional, so an adversary controls *which* rounds are present and *when*.
-Choosing "the latest stored round" or falling back to `R+1` when `R` is missing lets them choose outcomes.
-The target must be derived from `block.timestamp`, and settlement must wait for exactly that round.
+**Trust you inherit.** drand's threshold committee, the sequencer's clock, and the registry deployment
+you point at. Verify the registry rather than copying its address: `verifier()`, `verifierCodehash()`
+against the live verifier code, and a bytecode diff against the pinned commits. The chain must have the
+Prague BLS precompiles, and there is no mainnet registry yet.
 
-### 5.4 No selective abort
-
-Once committed, the user must not be able to cancel or refund based on whether the now-public result is
-favourable. This contract has no cancel path at all. If yours needs one, it cannot be user-callable after
-the round is public.
-
-### 5.5 Pin everything at commit, domain-separate every seed
-
-Config, price targets, participant, count: read them from storage at settle, never re-read "current"
-config. Seeds must include a purpose tag, `block.chainid`, `address(this)`, the commitment id and the draw
-index, because the stored beacon is identical on every chain. Use one tag per purpose so two draws never
-share a seed. Draw bounded values with rejection sampling.
-
-### 5.6 Who pays for the beacon import
-
-The first importer of a round pays ~680k gas for the pairing; later readers pay two SLOADs. If several of
-your commitments share a round, only one import is needed. **Questions:** does the player pay (one-click
-`settleWithBeacon`), does your relayer pay, or both? How do you keep the relayer funded and what do you do
-when it runs dry (this app falls back to the user's wallet)?
-
-### 5.7 Relayer engineering details we hit
-
-- One key cannot send concurrent transactions: serialize, or fetch the pending nonce and retry on
-  collisions. Serverless functions overlap, so `/api/settle` retries.
-- Simulate first and treat `AlreadySettled` as success; someone else may have beaten you to it.
-- `api.drand.sh` can be slow or down; the app tries `api.drand.sh`, `api2.drand.sh`, `api3.drand.sh` in order.
-- The nudge endpoint spends your gas on request. It only ever settles flips that are genuinely due, so the
-  worst an abuser can do is make you pay for settlements you wanted anyway, but rate-limit it if that matters.
-- Gate on `gasleft()` before any external call whose failure you catch, or a caller can starve it to pick a branch.
-
-### 5.8 Trust assumptions you are inheriting
-
-- **drand threshold collusion** could know a future beacon early regardless of lead. That is the beacon's
-  own trust model (League of Entropy, t-of-n).
-- **Sequencer clock** as in 5.2.
-- **The registry deployment you point at.** Do not copy the address, verify it: `verifier()` must be the
-  expected verifier, `verifierCodehash()` must equal `keccak(code)` of that verifier, and the runtime bytecode
-  should diff clean against the pinned commits with the metadata trailer stripped. Our deploy script asserts
-  the first three every time.
-- **Chain support.** The verifier needs the Prague BLS precompiles (EIP-2537). No mainnet registry exists
-  yet; a mainnet consumer needs the registry and verifier deployed and verified there first.
-
-### 5.9 Open questions we would ask the registry maintainers
-
-- Timeline and chains for a mainnet registry deployment, and who will operate public relayers.
-- Whether `minimumLeadRounds()` will ever be enforced on `submitBeacon`, or should be treated purely as advisory.
-- Whether the registry should expose the raw signature as well as `sha256(signature)` for on-chain re-derivation.
-- Recommended behaviour if drand pauses or a round is skipped: the schedule assumes strictly 3 s rounds.
+**Questions for the registry maintainers.** Mainnet deployment timeline and chains, whether public
+relayers will be operated, whether `minimumLeadRounds()` will ever be enforced on `submitBeacon`, and
+the expected behaviour if drand pauses or skips a round.
 
 ---
 
