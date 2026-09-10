@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+contracts/out/
+contracts/cache/
+contracts/broadcast/**/dry-run/
+relayer/.relayer-state.json
+.DS_Store
+relayer/relayer.log
+.next/
+web/.vercel/

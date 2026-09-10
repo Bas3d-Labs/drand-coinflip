@@ -1,0 +1,11 @@
+{
+  "name": "relayer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env index.mjs"
+  },
+  "dependencies": {
+    "viem": "^2.56.3"
+  }
+}

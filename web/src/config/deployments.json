@@ -1,0 +1,9 @@
+{
+  "46630": {
+    "coinFlip": "0xa7e13fe13245c18732f40a342263d4949c728022",
+    "registry": "0x6e69C56D8D678aDeF8401adF1186c026A0915e2a",
+    "leadRounds": 4,
+    "deployBlock": 116823134,
+    "deployTx": "0xa252f04ae7f8ccf3662411d080fd44aa9f524daac60480ac5250fe2f364f2ba9"
+  }
+}

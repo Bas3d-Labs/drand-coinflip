@@ -1,0 +1,15 @@
+{
+  "name": "drand-coinflip",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "preview": "pnpm --filter web start",
+    "relayer": "pnpm --filter relayer start",
+    "test": "cd contracts && forge test --no-match-contract Fork",
+    "test:fork": "cd contracts && forge test --match-contract Fork --fork-url robinhood_testnet -vv",
+    "sync-abi": "cd contracts && forge build && node ../scripts/sync-abi.mjs",
+    "sync-deployment": "node scripts/sync-deployment.mjs",
+    "start": "pnpm --filter web start"
+  }
+}
