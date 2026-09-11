@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.36;
 
-import {IDrandQuicknetBeaconRegistry} from "../src/interfaces/IDrandQuicknetBeaconRegistry.sol";
+import {IDrandQuicknetBeaconRegistry} from "drand-quicknet-evm/interfaces/IDrandQuicknetBeaconRegistry.sol";
 
 /// @dev Faithful reproduction of the registry's round math; storage is filled by tests.
 contract MockRegistry is IDrandQuicknetBeaconRegistry {

@@ -1,9 +1,10 @@
 {
   "46630": {
-    "coinFlip": "0xa7e13fe13245c18732f40a342263d4949c728022",
-    "registry": "0x6e69C56D8D678aDeF8401adF1186c026A0915e2a",
+    "coinFlip": "0x2fa62bbd6a2c454346b617ec881e413f31713a0b",
+    "registry": "0xB1e8bc94AdBb82F036aafC2Af004986F810dd0fe",
+    "registryCodehash": "0x6d84157b97cfea3d51931f84f17638028dff7560d9be1f07c9d668fa37480e73",
     "leadRounds": 4,
-    "deployBlock": 116823134,
-    "deployTx": "0xa252f04ae7f8ccf3662411d080fd44aa9f524daac60480ac5250fe2f364f2ba9"
+    "deployBlock": 117545983,
+    "deployTx": "0x06c1f5faf3653f95429fa8c61264092d3d5370747a937362503aceb99d8dbd91"
   }
 }

@@ -9,6 +9,11 @@ export const coinFlipAbi = [
         "internalType": "address"
       },
       {
+        "name": "registryCodehash_",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "leadRounds",
         "type": "uint64",
         "internalType": "uint64"
@@ -31,19 +36,6 @@ export const coinFlipAbi = [
   },
   {
     "type": "function",
-    "name": "LEAD_ROUNDS",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "bounded",
     "inputs": [
       {
@@ -59,7 +51,7 @@ export const coinFlipAbi = [
     ],
     "outputs": [
       {
-        "name": "",
+        "name": "draw",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -74,6 +66,11 @@ export const coinFlipAbi = [
         "name": "id",
         "type": "uint256",
         "internalType": "uint256"
+      },
+      {
+        "name": "round",
+        "type": "uint64",
+        "internalType": "uint64"
       },
       {
         "name": "randomness",
@@ -308,16 +305,55 @@ export const coinFlipAbi = [
   },
   {
     "type": "function",
-    "name": "registry",
+    "name": "quicknetBeaconRegistry",
     "inputs": [],
     "outputs": [
       {
         "name": "",
         "type": "address",
-        "internalType": "contract IDrandQuicknetBeaconRegistry"
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "quicknetBeaconRegistryCodehash",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "quicknetLeadRounds",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "seedDomain",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "pure"
   },
   {
     "type": "function",
@@ -488,7 +524,7 @@ export const coinFlipAbi = [
       {
         "name": "round",
         "type": "uint64",
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint64"
       }
     ],
@@ -529,19 +565,39 @@ export const coinFlipAbi = [
   },
   {
     "type": "error",
-    "name": "LeadTooShort",
+    "name": "InvalidQuicknetBeaconRegistry",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidQuicknetBeaconRegistryCodehash",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidQuicknetLeadRounds",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "QuicknetLeadBelowRegistryMinimum",
     "inputs": [
       {
-        "name": "lead",
+        "name": "leadRounds",
         "type": "uint64",
         "internalType": "uint64"
       },
       {
-        "name": "minimum",
+        "name": "minimumLeadrounds",
         "type": "uint64",
         "internalType": "uint64"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "QuicknetRoundOverflow",
+    "inputs": []
   },
   {
     "type": "error",
@@ -569,7 +625,7 @@ export const registryAbi = [
     ],
     "outputs": [
       {
-        "name": "",
+        "name": "randomness",
         "type": "bytes32",
         "internalType": "bytes32"
       }
@@ -676,7 +732,7 @@ export const registryAbi = [
     ],
     "outputs": [
       {
-        "name": "",
+        "name": "randomness",
         "type": "bytes32",
         "internalType": "bytes32"
       }

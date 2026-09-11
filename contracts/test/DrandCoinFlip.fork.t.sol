@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.36;
 
 import {Test} from "forge-std/Test.sol";
 import {DrandCoinFlip} from "../src/DrandCoinFlip.sol";
-import {IDrandQuicknetBeaconRegistry} from "../src/interfaces/IDrandQuicknetBeaconRegistry.sol";
+import {IDrandQuicknetBeaconRegistry} from "drand-quicknet-evm/interfaces/IDrandQuicknetBeaconRegistry.sol";
+import {DrandQuicknetRandomnessConsumer} from "drand-quicknet-evm/consumers/DrandQuicknetRandomnessConsumer.sol";
 
 /// @notice Integration test against the REAL registry + BLS verifier on Robinhood Chain Testnet.
 ///         Run: forge test --match-contract Fork --fork-url robinhood_testnet
 ///         Skipped automatically when not running on a fork of chain 46630.
 contract DrandCoinFlipForkTest is Test {
-    address constant REGISTRY = 0x6e69C56D8D678aDeF8401adF1186c026A0915e2a;
+    // From drand-quicknet-evm/deployments/robinhood-testnet.json
+    address constant REGISTRY = 0xB1e8bc94AdBb82F036aafC2Af004986F810dd0fe;
+    bytes32 constant REGISTRY_CODEHASH = 0x6d84157b97cfea3d51931f84f17638028dff7560d9be1f07c9d668fa37480e73;
+    address constant VERIFIER = 0xAe9a1AbF0D30633ec1Eb73038F375b2c7Ee0E01e;
+    bytes32 constant VERIFIER_CODEHASH = 0x916ebb69c0ceb4c049d50ad8bf5b3e566661a2b1ef33e01727ed443673b68aab;
 
     // Genuine Quicknet beacons (https://api.drand.sh/v2/beacons/quicknet/rounds/{round})
     uint64 constant R0 = 32000000;
@@ -31,16 +36,26 @@ contract DrandCoinFlipForkTest is Test {
 
     function setUp() public {
         if (block.chainid != 46630) return;
-        cf = new DrandCoinFlip(REGISTRY, 4);
+        cf = new DrandCoinFlip(REGISTRY, REGISTRY_CODEHASH, 4);
     }
 
     function test_registryBinding() public onlyFork {
-        assertEq(reg.verifier(), 0x90427e40e7D6f60425D29474a85595C4d8EE6B95);
-        assertEq(reg.verifierCodehash(), reg.verifier().codehash);
+        assertEq(REGISTRY.codehash, REGISTRY_CODEHASH);
+        assertEq(reg.verifier(), VERIFIER);
+        assertEq(reg.verifierCodehash(), VERIFIER_CODEHASH);
+        assertEq(reg.verifierCodehash(), VERIFIER.codehash);
         assertEq(reg.minimumLeadRounds(), 3);
         assertEq(reg.roundAt(1692803367), 1);
         assertEq(reg.roundAt(1692803367 + 3), 2);
         assertEq(reg.roundAt(1692803367 - 1), 0);
+        assertEq(cf.quicknetBeaconRegistry(), REGISTRY);
+        assertEq(cf.quicknetBeaconRegistryCodehash(), REGISTRY_CODEHASH);
+    }
+
+    function test_consumerRefusesRegistryWithOtherCodehash() public onlyFork {
+        // The previous (superseded) testnet registry has different bytecode: binding must fail.
+        vm.expectRevert(DrandQuicknetRandomnessConsumer.InvalidQuicknetBeaconRegistryCodehash.selector);
+        new DrandCoinFlip(0x6e69C56D8D678aDeF8401adF1186c026A0915e2a, REGISTRY_CODEHASH, 4);
     }
 
     function test_realVerifierAcceptsGenuineSignature() public onlyFork {
@@ -82,7 +97,20 @@ contract DrandCoinFlipForkTest is Test {
         DrandCoinFlip.Flip memory f = cf.getFlip(id);
         assertTrue(f.settled);
         assertEq(f.randomness, sha256(SIG1));
-        assertEq(f.seed, keccak256(abi.encode(cf.DOMAIN_TAG(), uint256(46630), address(cf), id, uint16(0), sha256(SIG1))));
+        assertEq(
+            f.seed,
+            keccak256(
+                abi.encode(
+                    keccak256("based-labs.drand-quicknet.consumer.seed.v1"),
+                    cf.DOMAIN_TAG(),
+                    uint256(46630),
+                    address(cf),
+                    bytes32(id),
+                    R1,
+                    sha256(SIG1)
+                )
+            )
+        );
         assertEq(uint8(f.result), uint8(uint256(f.seed) % 2));
     }
 }
