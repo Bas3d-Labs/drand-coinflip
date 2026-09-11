@@ -6,7 +6,7 @@ import { FlipLog } from '../components/FlipLog'
 import { useAllFlips } from '../hooks/useFlips'
 import { explorerAddr, pct } from '../lib/format'
 import { COINFLIP_ADDRESS } from '../config/deployments'
-import { REGISTRY_ADDRESS } from '../config/chain'
+import { REGISTRY_ADDRESS, REGISTRY_CODEHASH, VERIFIER_ADDRESS } from '../config/chain'
 
 export default function DashboardPage() {
   const { flips, isLoading, error } = useAllFlips(4000)
@@ -57,7 +57,12 @@ export default function DashboardPage() {
           <dt>DrandCoinFlip</dt>
           <dd><a href={explorerAddr(COINFLIP_ADDRESS)} target="_blank" rel="noreferrer">{COINFLIP_ADDRESS || 'not deployed'}</a></dd>
           <dt>Beacon registry</dt>
-          <dd><a href={explorerAddr(REGISTRY_ADDRESS)} target="_blank" rel="noreferrer">{REGISTRY_ADDRESS}</a></dd>
+          <dd>
+            <a href={explorerAddr(REGISTRY_ADDRESS)} target="_blank" rel="noreferrer">{REGISTRY_ADDRESS}</a>
+            <div className="chart-sub" title="Pinned in the contract via DrandQuicknetRandomnessConsumer; construction reverts on mismatch">codehash {REGISTRY_CODEHASH}</div>
+          </dd>
+          <dt>BLS verifier</dt>
+          <dd><a href={explorerAddr(VERIFIER_ADDRESS)} target="_blank" rel="noreferrer">{VERIFIER_ADDRESS}</a></dd>
           <dt>Beacon source</dt>
           <dd><a href="https://api.drand.sh/v2/beacons/quicknet/info" target="_blank" rel="noreferrer">drand Quicknet (period 3s, unchained, BLS12-381 G1)</a></dd>
         </dl>

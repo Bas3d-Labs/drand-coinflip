@@ -29,10 +29,10 @@ export function HowItWorksModal({ open, onClose, stepIdx = 0 }: { open: boolean;
           verified on-chain and turned into your result. Nobody, including the contract, can know it in advance.
         </p>
         <div className="steps">
-          <Step n={1} idx={stepIdx} title="Commit" desc={<>You call a side. The contract picks drand round <code>roundAt(block.timestamp) + {LEAD_ROUNDS}</code>. You cannot choose or influence it.</>} />
+          <Step n={1} idx={stepIdx} title="Commit" desc={<>You call a side. The contract picks drand round <code>latestScheduledRound() + {LEAD_ROUNDS}</code>. You cannot choose or influence it.</>} />
           <Step n={2} idx={stepIdx} title="Wait for the beacon" desc={<>Quicknet publishes one BLS12-381 threshold signature every 3s. The target round does not exist yet at commit time.</>} />
           <Step n={3} idx={stepIdx} title="Import & verify on-chain" desc={<>Anyone submits the 48-byte signature to the registry. It is checked with a BLS pairing (EIP-2537) against Quicknet's public key and cached as <code>sha256(signature)</code>.</>} />
-          <Step n={4} idx={stepIdx} title="Settle" desc={<>The contract reads exactly that round, derives <code>seed = keccak(tag, chainId, contract, id, 0, randomness)</code> and picks Heads/Tails by rejection sampling.</>} />
+          <Step n={4} idx={stepIdx} title="Settle" desc={<>The contract reads exactly that round, derives <code>seed = keccak(seedDomain, tag, chainId, contract, id, round, randomness)</code> and picks Heads/Tails by rejection sampling.</>} />
         </div>
         <div className="modal-links">
           <a className="btn btn-sm" href="https://github.com/Bas3d-Labs/drand-quicknet-evm" target="_blank" rel="noreferrer">

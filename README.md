@@ -10,8 +10,10 @@ in the browser.
 
 | | |
 |---|---|
-| Live contract | [`0xa7E13fE13245c18732F40A342263d4949c728022`](https://explorer.testnet.chain.robinhood.com/address/0xa7E13fE13245c18732F40A342263d4949c728022) (source verified) |
-| Beacon registry | [`0x6e69C56D8D678aDeF8401adF1186c026A0915e2a`](https://explorer.testnet.chain.robinhood.com/address/0x6e69C56D8D678aDeF8401adF1186c026A0915e2a) |
+| Live contract | [`0x2fA62BBd6a2c454346B617EC881E413f31713A0B`](https://explorer.testnet.chain.robinhood.com/address/0x2fA62BBd6a2c454346B617EC881E413f31713A0B) (source verified) |
+| Beacon registry | [`0xB1e8bc94AdBb82F036aafC2Af004986F810dd0fe`](https://explorer.testnet.chain.robinhood.com/address/0xB1e8bc94AdBb82F036aafC2Af004986F810dd0fe) — codehash `0x6d84157b…0e73` |
+| Beacon verifier | [`0xAe9a1AbF0D30633ec1Eb73038F375b2c7Ee0E01e`](https://explorer.testnet.chain.robinhood.com/address/0xAe9a1AbF0D30633ec1Eb73038F375b2c7Ee0E01e) — codehash `0x916ebb69…8aab` |
+| Base contract | [`DrandQuicknetRandomnessConsumer`](https://github.com/Bas3d-Labs/drand-quicknet-evm/blob/main/contracts/src/consumers/DrandQuicknetRandomnessConsumer.sol) from drand-quicknet-evm `b0f84b4` (git submodule) |
 | Chain | Robinhood Chain Testnet, id `46630`, RPC `https://rpc.testnet.chain.robinhood.com` |
 | Randomness | [drand Quicknet](https://drand.love) — one BLS12-381 signature every 3 s, chain hash `52db9ba7…4e971` |
 
@@ -39,7 +41,19 @@ It is a permissionless, write-once cache of *verified* drand beacons:
   public key.
 - On success the registry stores `sha256(signature)` for the round. No owner, no setter, no overwrite.
 
-The consumer pattern is therefore **commit to a round, settle from it**. This is what `DrandCoinFlip.sol` does:
+The consumer pattern is therefore **commit to a round, settle from it**. `DrandCoinFlip.sol` inherits
+[`DrandQuicknetRandomnessConsumer`](contracts/lib/drand-quicknet-evm/contracts/src/consumers/DrandQuicknetRandomnessConsumer.sol),
+the reusable base contract from drand-quicknet-evm, which owns every registry-facing concern:
+
+| Concern | Handled by the base contract |
+|---|---|
+| Registry authentication | Constructor reverts unless `registry.codehash == expectedRegistryCodehash` (from the upstream deployment manifest) |
+| Lead floor | Constructor reverts if `leadRounds < registry.minimumLeadRounds()` |
+| Round commitment | `_requestQuicknetRandomness()` returns `latestScheduledRound() + quicknetLeadRounds` and emits `QuicknetRandomnessRequested(round)` |
+| Reads / liveness | `_isQuicknetBeaconStored`, `_getQuicknetBeacon`, `_submitQuicknetBeacon` (same round only) |
+| Seed derivation | `_deriveQuicknetSeed(appDomain, uniqueRequestId, round, randomness)` with a fixed outer domain |
+
+The coin flip itself is ~80 lines on top of that:
 
 ```mermaid
 sequenceDiagram
@@ -50,8 +64,8 @@ sequenceDiagram
     participant X as Relayer (anyone)
 
     U->>C: flip(side)
-    C->>R: roundAt(block.timestamp)
-    C-->>C: target = round + LEAD_ROUNDS (4)
+    C->>R: latestScheduledRound()
+    C-->>C: target = round + quicknetLeadRounds (4)
     C-->>X: emit QuicknetRandomnessRequested(target)
     Note over D: ~12 s later drand publishes round `target`
     X->>D: GET /v2/beacons/quicknet/rounds/{target}
@@ -59,7 +73,7 @@ sequenceDiagram
     C->>R: submitBeacon(target, signature)
     R-->>R: BLS pairing check, store sha256(sig)
     C->>R: getBeacon(target)
-    C-->>C: seed = keccak(tag, chainId, this, id, 0, beacon)
+    C-->>C: seed = keccak(seedDomain, tag, chainId, this, id, target, beacon)
     C-->>C: result = bounded(seed, 2)
     C-->>U: emit FlipSettled(... result, won)
 ```
@@ -67,23 +81,25 @@ sequenceDiagram
 ### Commit — [`flip()`](contracts/src/DrandCoinFlip.sol)
 
 ```solidity
-uint64 target = registry.roundAt(block.timestamp) + LEAD_ROUNDS;   // contract-derived, never caller-supplied
+uint64 target = _requestQuicknetRandomness();   // latestScheduledRound() + quicknetLeadRounds; contract-derived, never caller-supplied
 ```
 
 The player picks only a side. The round comes from the block timestamp plus a fixed lead, so at commit
-time the beacon does not exist yet. `LEAD_ROUNDS` is an immutable checked against
-`registry.minimumLeadRounds()` in the constructor **and** in the deploy script.
+time the beacon does not exist yet. `quicknetLeadRounds` is an immutable set by the base constructor, which
+refuses anything below `registry.minimumLeadRounds()`. The deploy script re-checks it, plus the registry
+and verifier codehashes, before spending gas.
 
 ### Settle — [`settle()` / `settleWithBeacon()`](contracts/src/DrandCoinFlip.sol)
 
 - Permissionless. Whoever calls it, the payout goes to the player and the outcome is the same.
-- Requires `registry.isStored(target)`. If the beacon is not imported yet the call reverts and the flip
+- Requires `_isQuicknetBeaconStored(target)`. If the beacon is not imported yet the call reverts and the flip
   stays pending. **The round is never substituted.**
-- `settleWithBeacon(id, sig)` is a convenience that imports and settles in one transaction so a relayer
-  or the player can do it with one click.
-- The seed is domain-separated: `keccak256(abi.encode(DOMAIN_TAG, block.chainid, address(this), id, uint16(0), randomness))`.
+- `settleWithBeacon(id, sig)` wraps `_submitQuicknetBeacon` for the *committed* round and settles in one
+  transaction so a relayer or the player can do it with one click. It is a liveness path, not a choice.
+- The seed comes from the base contract's `_deriveQuicknetSeed(DOMAIN_TAG, bytes32(id), round, randomness)`:
+  `keccak256(abi.encode(QUICKNET_SEED_DOMAIN, DOMAIN_TAG, block.chainid, address(this), bytes32(id), round, randomness))`.
   The same beacon is stored identically on every chain that imports it, so chain id and contract address
-  must be in the seed.
+  are in the seed; the flip id is the unique request id the base contract requires.
 - Heads/Tails is drawn with rejection sampling (`bounded(seed, 2)`), not `seed % n`.
 
 ### Relaying — three layers so a flip always settles
@@ -98,8 +114,9 @@ timing must not be a free option for the player. We use:
 3. **Reveal button** — the player (or anyone) can always settle from their own wallet.
 
 A standalone [`relayer/index.mjs`](relayer/index.mjs) does the same job as a long-running process for
-self-hosting. The contract also emits `QuicknetRandomnessRequested(round)`, so the reference relayer daemon
-in `drand-quicknet-evm/apps/relayer` works unchanged.
+self-hosting. Because the contract implements `IDrandQuicknetRandomnessConsumer` (the base contract emits
+`QuicknetRandomnessRequested(round)` and exposes `quicknetBeaconRegistry()`), the reference relayer daemon in
+`drand-quicknet-evm/apps/relayer` can also service it with `QUICKNET_CONSUMERS=<address>`.
 
 ### Verification — what the dashboard checks
 
@@ -107,7 +124,7 @@ For every settled flip the browser fetches the round from drand's public API and
 using nothing but public inputs:
 
 1. `sha256(signature)` equals the `randomness` the contract recorded (and equals `registry.getBeacon(round)`).
-2. `keccak256(abi.encode(tag, 46630, contract, id, 0, randomness))` equals the recorded `seed`.
+2. `keccak256(abi.encode(seedDomain, tag, 46630, contract, bytes32(id), round, randomness))` equals the recorded `seed`.
 3. `bounded(seed, 2)` equals the recorded result.
 
 Note that `sha256(signature)` is also exactly the `randomness` field drand itself publishes in its v1 API,
@@ -118,8 +135,9 @@ so the registry value can be cross-checked against drand without touching the ch
 ## 2. Repository layout
 
 ```
-contracts/   Foundry: DrandCoinFlip.sol, IDrandQuicknetBeaconRegistry.sol, unit tests (mock registry),
+contracts/   Foundry: DrandCoinFlip.sol (extends DrandQuicknetRandomnessConsumer), unit tests (mock registry),
              fork tests against the real registry + BLS verifier, Deploy.s.sol with safety assertions
+contracts/lib/drand-quicknet-evm/   upstream submodule — base contract, interfaces, deployment manifest
 web/         Next.js (App Router) + wagmi/viem: Flip page, Dashboard, /api/settle, /api/sweep, vercel.json cron
 relayer/     Standalone relayer for self-hosting
 scripts/     sync-abi (contracts -> web), sync-deployment (forge broadcast -> web config)
@@ -138,7 +156,7 @@ docs/        integration-notes.md — the security-review notes this integration
   deploying cost ~0.00001 ETH and a settlement that imports a beacon is ~0.7M gas.
 
 ```bash
-git clone --recurse-submodules <this repo> && cd coinflip   # forge-std is a submodule
+git clone --recurse-submodules <this repo> && cd coinflip   # forge-std and drand-quicknet-evm are submodules
 pnpm install
 ```
 
@@ -150,12 +168,16 @@ forge test                                                          # unit tests
 forge test --match-contract Fork --fork-url robinhood_testnet -vv   # against the REAL registry + verifier
 ```
 
-The fork tests submit a genuine past-round signature and assert it is stored, and assert a wrong-round
-signature and a sign-bit-flipped signature are rejected. `foundry.toml` sets `evm_version = "prague"`;
-without it the BLS precompile does not exist locally and every submission reverts.
+The fork tests submit a genuine past-round signature and assert it is stored, assert a wrong-round
+signature and a sign-bit-flipped signature are rejected, and assert the consumer refuses to bind to the
+superseded registry (different codehash). `foundry.toml` sets `evm_version = "prague"`; without it the
+BLS precompile does not exist locally and every submission reverts. `solc` is pinned to `0.8.36` to match
+the upstream `pragma`.
 
-Deploy. The script refuses to run unless the registry's `verifier()`, `verifierCodehash()`, the live
-verifier bytecode hash and `minimumLeadRounds()` all match what is pinned in it:
+Deploy. The script refuses to run unless the live registry codehash, `verifier()`, `verifierCodehash()`,
+the live verifier bytecode hash and `minimumLeadRounds()` all match what is pinned in it (taken from
+`lib/drand-quicknet-evm/deployments/robinhood-testnet.json`). The base constructor then checks the registry
+codehash a second time on-chain:
 
 ```bash
 cp .env.example .env                        # DEPLOYER_PRIVATE_KEY=..., or use --account <foundry keystore>
@@ -168,7 +190,8 @@ Verify source on Blockscout:
 ```bash
 cd contracts && forge verify-contract <ADDRESS> src/DrandCoinFlip.sol:DrandCoinFlip \
   --verifier blockscout --verifier-url https://explorer.testnet.chain.robinhood.com/api \
-  --constructor-args $(cast abi-encode 'constructor(address,uint64)' 0x6e69C56D8D678aDeF8401adF1186c026A0915e2a 4)
+  --constructor-args $(cast abi-encode 'constructor(address,bytes32,uint64)' \
+      0xB1e8bc94AdBb82F036aafC2Af004986F810dd0fe 0x6d84157b97cfea3d51931f84f17638028dff7560d9be1f07c9d668fa37480e73 4)
 ```
 
 ### 3.2 Web app
@@ -219,23 +242,23 @@ Connect with "Dev burner" and flip.
 
 ## 4. Verifying a result by hand
 
-Take flip `#0` on the live contract (round `32077160`):
+Take flip `#0` on the live contract (round `32113200`, settled Tails):
 
 ```bash
 RPC=https://rpc.testnet.chain.robinhood.com
-CF=0xa7E13fE13245c18732F40A342263d4949c728022
-REG=0x6e69C56D8D678aDeF8401adF1186c026A0915e2a
+CF=0x2fA62BBd6a2c454346B617EC881E413f31713A0B
+REG=0xB1e8bc94AdBb82F036aafC2Af004986F810dd0fe
 
 # 1. what the contract recorded
 cast call $CF 'getFlip(uint256)((address,uint8,uint8,bool,uint64,uint64,uint64,bytes32,bytes32))' 0 --rpc-url $RPC
 
 # 2. drand's signature for that round, hashed
-SIG=$(curl -s https://api.drand.sh/v2/beacons/quicknet/rounds/32077160 | jq -r .signature)
+SIG=$(curl -s https://api.drand.sh/v2/beacons/quicknet/rounds/32113200 | jq -r .signature)
 echo -n $SIG | xxd -r -p | shasum -a 256          # == randomness in step 1 == registry value below
-cast call $REG 'getBeacon(uint64)(bytes32)' 32077160 --rpc-url $RPC
+cast call $REG 'getBeacon(uint64)(bytes32)' 32113200 --rpc-url $RPC
 
 # 3. the seed and the result
-cast call $CF 'computeSeed(uint256,bytes32)(bytes32)' 0 0x<randomness> --rpc-url $RPC
+cast call $CF 'computeSeed(uint256,uint64,bytes32)(bytes32)' 0 32113200 0x<randomness> --rpc-url $RPC
 cast call $CF 'bounded(bytes32,uint256)(uint256)' 0x<seed> 2 --rpc-url $RPC   # 0 = Heads, 1 = Tails
 ```
 
@@ -279,7 +302,9 @@ nonce errors; simulate first and treat `AlreadySettled` as success; keep a fallb
 
 **Trust you inherit.** drand's threshold committee, the sequencer's clock, and the registry deployment
 you point at. Verify the registry rather than copying its address: `verifier()`, `verifierCodehash()`
-against the live verifier code, and a bytecode diff against the pinned commits. The chain must have the
+against the live verifier code, and a bytecode diff against the pinned commits. The base contract's
+codehash check turns a wrong registry address into a constructor revert, but it is only as good as the
+codehash you feed it — take it from the upstream manifest, not from the chain. The chain must have the
 Prague BLS precompiles, and there is no mainnet registry yet.
 
 **Questions for the registry maintainers.** Mainnet deployment timeline and chains, whether public
@@ -290,11 +315,13 @@ the expected behaviour if drand pauses or skips a round.
 
 ## 6. Adapting this for your own app
 
-1. Copy [`IDrandQuicknetBeaconRegistry.sol`](contracts/src/interfaces/IDrandQuicknetBeaconRegistry.sol) and
-   the commit/settle skeleton from `DrandCoinFlip.sol`. Replace `bounded(seed, 2)` with your own draw; use
-   one `DOMAIN_TAG` per purpose.
-2. Set `LEAD_ROUNDS` for your risk (≥ 10 with value) and keep the constructor and deploy-script assertions.
-3. Keep `settle` permissionless and emit `QuicknetRandomnessRequested`.
+1. Add `drand-quicknet-evm` as a submodule and inherit `DrandQuicknetRandomnessConsumer`
+   (`remappings = ["drand-quicknet-evm/=lib/drand-quicknet-evm/contracts/src/"]`, `solc 0.8.36`). Copy the
+   commit/settle skeleton from `DrandCoinFlip.sol`. Replace `bounded(seed, 2)` with your own draw; use one
+   application domain per purpose and an incrementing id as `uniqueRequestId`.
+2. Pass the registry codehash from `deployments/<network>.json` and a lead sized for your risk (≥ 10 with
+   value). Keep the deploy-script assertions.
+3. Keep `settle` permissionless; the base contract emits `QuicknetRandomnessRequested` for you.
 4. Reuse [`web/src/server/relayer.ts`](web/src/server/relayer.ts) as-is; it only depends on the ABI and
    the drand schedule.
 5. Reuse [`web/src/lib/verify.ts`](web/src/lib/verify.ts) for client-side verification so your users can

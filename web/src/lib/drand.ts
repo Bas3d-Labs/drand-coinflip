@@ -64,14 +64,28 @@ export async function beaconRandomness(signatureHex: string): Promise<Hex> {
   return bytesToHex(new Uint8Array(digest))
 }
 
+/** Outer domain fixed by DrandQuicknetRandomnessConsumer (drand-quicknet-evm). */
+export const QUICKNET_SEED_DOMAIN = keccak256(new TextEncoder().encode('based-labs.drand-quicknet.consumer.seed.v1'))
+/** Application domain chosen by DrandCoinFlip. */
 export const DOMAIN_TAG = keccak256(new TextEncoder().encode('DRAND_COINFLIP_V1'))
 
-/** Mirrors DrandCoinFlip.computeSeed: keccak256(abi.encode(tag, chainid, contract, id, uint16(0), randomness)). */
-export function computeSeed(chainId: number, contract: Address, id: bigint, randomness: Hex): Hex {
+/**
+ * Mirrors DrandCoinFlip.computeSeed, i.e. DrandQuicknetRandomnessConsumer._deriveQuicknetSeed:
+ *   keccak256(abi.encode(QUICKNET_SEED_DOMAIN, DOMAIN_TAG, chainid, contract, bytes32(id), round, randomness))
+ */
+export function computeSeed(chainId: number, contract: Address, id: bigint, round: bigint, randomness: Hex): Hex {
   return keccak256(
     encodeAbiParameters(
-      [{ type: 'bytes32' }, { type: 'uint256' }, { type: 'address' }, { type: 'uint256' }, { type: 'uint16' }, { type: 'bytes32' }],
-      [DOMAIN_TAG, BigInt(chainId), contract, id, 0, randomness],
+      [
+        { type: 'bytes32' },
+        { type: 'bytes32' },
+        { type: 'uint256' },
+        { type: 'address' },
+        { type: 'bytes32' },
+        { type: 'uint64' },
+        { type: 'bytes32' },
+      ],
+      [QUICKNET_SEED_DOMAIN, DOMAIN_TAG, BigInt(chainId), contract, `0x${id.toString(16).padStart(64, '0')}`, round, randomness],
     ),
   )
 }

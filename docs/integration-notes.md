@@ -24,8 +24,12 @@ checked against the deployed bytecode and pinned source.
 
 | Contract | Address | Source (commit) |
 |---|---|---|
-| `DrandQuicknetBeaconRegistry` | `0x6e69C56D8D678aDeF8401adF1186c026A0915e2a` | `f6f51cb` |
-| `DrandQuicknetBeaconVerifier` | `0x90427e40e7D6f60425D29474a85595C4d8EE6B95` | `f566503` |
+| `DrandQuicknetBeaconRegistry` | `0xB1e8bc94AdBb82F036aafC2Af004986F810dd0fe` | `b0f84b4` (codehash `0x6d84157b97cfea3d51931f84f17638028dff7560d9be1f07c9d668fa37480e73`) |
+| `DrandQuicknetBeaconVerifier` | `0xAe9a1AbF0D30633ec1Eb73038F375b2c7Ee0E01e` | `b0f84b4` (codehash `0x916ebb69c0ceb4c049d50ad8bf5b3e566661a2b1ef33e01727ed443673b68aab`) |
+
+The previous pair (`0x6e69…5e2a` / `0x9042…6B95`, 2026-09-10) is superseded; a consumer built on
+`DrandQuicknetRandomnessConsumer` with the new codehash refuses to bind to it. Addresses and
+codehashes come from `deployments/robinhood-testnet.json` in the upstream repo.
 
 Constants: `GENESIS_TIMESTAMP = 1692803367`, `PERIOD_SECONDS = 3`,
 `minimumLeadRounds() = 3`. **There is no mainnet deployment yet** — a mainnet consumer
@@ -45,6 +49,15 @@ trailer stripped (the registry has three immutables — mask them). Both deploye
 contracts above match their pinned source byte-for-byte this way.
 
 ## 3. The interface you use
+
+**Prefer the base contract.** Since `b0f84b4` the repo ships
+`contracts/src/consumers/DrandQuicknetRandomnessConsumer.sol`, an abstract contract that
+implements everything in §4 below except the game logic: registry codehash authentication
+and lead-floor check in the constructor, `_requestQuicknetRandomness()` (commit + relayer
+event), `_getQuicknetBeacon` / `_isQuicknetBeaconStored` / `_submitQuicknetBeacon`, and
+`_deriveQuicknetSeed(appDomain, uniqueRequestId, round, randomness)`. `DrandCoinFlip.sol`
+in this repo is the worked example. The raw interface is still what the base contract
+talks to:
 
 ```solidity
 interface IDrandQuicknetBeaconRegistry {
@@ -119,7 +132,9 @@ Rules at settle time:
 6. **Domain-separate every seed** with a purpose tag, `block.chainid`, `address(this)`,
    the commitment id, and the draw index. The stored beacon is identical on every chain
    that imports the round. Use one tag per purpose (e.g. rarity vs. amount) so two draws
-   never share a seed.
+   never share a seed. The base contract's `_deriveQuicknetSeed` does this with an outer
+   domain (`based-labs.drand-quicknet.consumer.seed.v1`), your application domain, chain
+   id, contract, a `bytes32` unique request id, the round and the randomness.
 7. **Bounded uniform draws must use rejection sampling**, not `seed % n`:
 
 ```solidity
@@ -191,6 +206,7 @@ round, then reveal them one at a time — one wait, instant reveals.
 ## 8. Checklist
 
 - [ ] Registry address verified (verifier binding, codehashes, source diff), not copied
+- [ ] Registry codehash from the upstream manifest passed to `DrandQuicknetRandomnessConsumer`
 - [ ] Target round = `roundAt(block.timestamp) + LEAD_ROUNDS`, caller has no input
 - [ ] `LEAD_ROUNDS` ≥ registry `minimumLeadRounds()`, and ≥ 10 for real value
 - [ ] All outcome inputs pinned at commit; settle reads stored state only

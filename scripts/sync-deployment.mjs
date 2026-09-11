@@ -12,12 +12,13 @@ const run = JSON.parse(fs.readFileSync(runPath, 'utf8'))
 const tx = run.transactions.find((t) => t.transactionType === 'CREATE' && t.contractName === 'DrandCoinFlip')
 if (!tx) throw new Error('DrandCoinFlip CREATE not found in broadcast')
 const receipt = run.receipts.find((r) => r.transactionHash === tx.hash)
-const [registry, lead] = tx.arguments ?? []
+const [registry, registryCodehash, lead] = tx.arguments ?? []
 const cfgPath = path.join(root, 'web/src/config/deployments.json')
 const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'))
 cfg[chainId] = {
   coinFlip: tx.contractAddress,
   registry: registry ?? cfg[chainId]?.registry,
+  registryCodehash: registryCodehash ?? cfg[chainId]?.registryCodehash,
   leadRounds: lead ? Number(lead) : cfg[chainId]?.leadRounds,
   deployBlock: receipt ? Number(receipt.blockNumber) : 0,
   deployTx: tx.hash,

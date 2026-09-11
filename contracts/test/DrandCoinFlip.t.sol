@@ -1,21 +1,39 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.36;
 
 import {Test} from "forge-std/Test.sol";
 import {DrandCoinFlip} from "../src/DrandCoinFlip.sol";
+import {DrandQuicknetRandomnessConsumer} from "drand-quicknet-evm/consumers/DrandQuicknetRandomnessConsumer.sol";
+import {IDrandQuicknetRandomnessConsumer} from "drand-quicknet-evm/interfaces/IDrandQuicknetRandomnessConsumer.sol";
 import {MockRegistry} from "./MockRegistry.sol";
 
 contract DrandCoinFlipTest is Test {
     uint64 constant LEAD = 4;
     MockRegistry reg;
+    bytes32 regCodehash;
     DrandCoinFlip cf;
     address alice = makeAddr("alice");
     address relayer = makeAddr("relayer");
 
     function setUp() public {
         reg = new MockRegistry();
+        regCodehash = address(reg).codehash;
         vm.warp(1_789_000_000);
-        cf = new DrandCoinFlip(address(reg), LEAD);
+        cf = new DrandCoinFlip(address(reg), regCodehash, LEAD);
+    }
+
+    function expectedSeed(uint256 id, uint64 round, bytes32 r) internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                keccak256("based-labs.drand-quicknet.consumer.seed.v1"),
+                cf.DOMAIN_TAG(),
+                block.chainid,
+                address(cf),
+                bytes32(id),
+                round,
+                r
+            )
+        );
     }
 
     // ---- round math (mirrors the registry) ----
@@ -26,12 +44,38 @@ contract DrandCoinFlipTest is Test {
         assertEq(reg.roundAt(reg.GENESIS_TIMESTAMP() - 1), 0);
     }
 
-    // ---- constructor ----
+    // ---- constructor (all enforced by DrandQuicknetRandomnessConsumer) ----
+
+    function test_constructorBindsRegistry() public view {
+        assertEq(cf.quicknetBeaconRegistry(), address(reg));
+        assertEq(cf.quicknetBeaconRegistryCodehash(), regCodehash);
+        assertEq(cf.quicknetLeadRounds(), LEAD);
+        assertEq(cf.seedDomain(), keccak256("based-labs.drand-quicknet.consumer.seed.v1"));
+    }
 
     function test_constructorEnforcesLeadFloor() public {
-        vm.expectRevert(abi.encodeWithSelector(DrandCoinFlip.LeadTooShort.selector, 2, 3));
-        new DrandCoinFlip(address(reg), 2);
-        new DrandCoinFlip(address(reg), 3); // ok at the floor
+        vm.expectRevert(
+            abi.encodeWithSelector(DrandQuicknetRandomnessConsumer.QuicknetLeadBelowRegistryMinimum.selector, 2, 3)
+        );
+        new DrandCoinFlip(address(reg), regCodehash, 2);
+        new DrandCoinFlip(address(reg), regCodehash, 3); // ok at the floor
+    }
+
+    function test_constructorRejectsZeroLead() public {
+        vm.expectRevert(DrandQuicknetRandomnessConsumer.InvalidQuicknetLeadRounds.selector);
+        new DrandCoinFlip(address(reg), regCodehash, 0);
+    }
+
+    function test_constructorRejectsWrongCodehash() public {
+        vm.expectRevert(DrandQuicknetRandomnessConsumer.InvalidQuicknetBeaconRegistryCodehash.selector);
+        new DrandCoinFlip(address(reg), keccak256("not the registry"), LEAD);
+        vm.expectRevert(DrandQuicknetRandomnessConsumer.InvalidQuicknetBeaconRegistryCodehash.selector);
+        new DrandCoinFlip(address(reg), bytes32(0), LEAD);
+    }
+
+    function test_constructorRejectsNonContractRegistry() public {
+        vm.expectRevert(DrandQuicknetRandomnessConsumer.InvalidQuicknetBeaconRegistry.selector);
+        new DrandCoinFlip(alice, regCodehash, LEAD);
     }
 
     // ---- commit ----
@@ -51,10 +95,12 @@ contract DrandCoinFlipTest is Test {
 
     function test_commitEmitsRelayerEvent() public {
         uint64 expected = reg.latestScheduledRound() + LEAD;
+        // Base contract emits the relayer discovery event first (round is indexed) ...
+        vm.expectEmit(true, false, false, true);
+        emit IDrandQuicknetRandomnessConsumer.QuicknetRandomnessRequested(expected);
+        // ... then the game event.
         vm.expectEmit(true, true, false, true);
         emit DrandCoinFlip.FlipCommitted(0, alice, DrandCoinFlip.Side.Tails, expected, uint64(block.timestamp));
-        vm.expectEmit(false, false, false, true);
-        emit DrandCoinFlip.QuicknetRandomnessRequested(expected);
         vm.prank(alice);
         cf.flip(DrandCoinFlip.Side.Tails);
     }
@@ -78,7 +124,8 @@ contract DrandCoinFlipTest is Test {
         DrandCoinFlip.Flip memory f = cf.getFlip(id);
         assertTrue(f.settled);
         assertEq(f.randomness, keccak256("t"));
-        assertEq(f.seed, cf.computeSeed(id, keccak256("t")));
+        assertEq(f.seed, cf.computeSeed(id, target, keccak256("t")));
+        assertEq(f.seed, expectedSeed(id, target, keccak256("t")));
         assertEq(uint8(f.result), uint8(cf.bounded(f.seed, 2)));
         assertEq(cf.settledCount(), 1);
         assertEq(cf.headsCount() + cf.tailsCount(), 1);
@@ -122,12 +169,13 @@ contract DrandCoinFlipTest is Test {
         uint256 a = cf.flip(DrandCoinFlip.Side.Heads);
         uint256 b = cf.flip(DrandCoinFlip.Side.Heads);
         vm.stopPrank();
+        uint64 round = cf.getFlip(a).targetRound;
+        assertEq(round, cf.getFlip(b).targetRound); // same block => same round
         bytes32 r = keccak256("same-round-beacon");
-        assertTrue(cf.computeSeed(a, r) != cf.computeSeed(b, r));
-        assertEq(
-            cf.computeSeed(a, r),
-            keccak256(abi.encode(cf.DOMAIN_TAG(), block.chainid, address(cf), a, uint16(0), r))
-        );
+        assertTrue(cf.computeSeed(a, round, r) != cf.computeSeed(b, round, r));
+        assertEq(cf.computeSeed(a, round, r), expectedSeed(a, round, r));
+        // round is also bound into the seed
+        assertTrue(cf.computeSeed(a, round, r) != cf.computeSeed(a, round + 1, r));
     }
 
     function test_unknownFlipReverts() public {
