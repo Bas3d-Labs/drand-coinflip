@@ -86,7 +86,7 @@ button { font-family: inherit; -webkit-tap-highlight-color: transparent; }
 .nav a.active { color: var(--text); background: var(--surface-3); }
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .icon-btn { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); font-weight: 700; cursor: pointer; display: grid; place-items: center; font-size: 15px; transition: background .15s, color .15s; }
-.icon-btn:hover { background: var(--surface-3); color: var(--text); }
+.icon-btn:hover { background: var(--surface-3); color: var(--text); text-decoration: none; }
 
 .main { position: relative; z-index: 1; flex: 1; width: 100%; max-width: 1120px; margin: 0 auto; padding: 24px 18px 48px; }
 .footer { position: relative; z-index: 1; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; padding: 20px; color: var(--text-3); font-size: 12px; }
