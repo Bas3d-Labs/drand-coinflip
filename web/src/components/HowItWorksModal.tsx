@@ -1,6 +1,7 @@
 'use client'
 import { useEffect } from 'react'
 import { LEAD_ROUNDS } from '../config/deployments'
+import { REPO_URL } from '../config/links'
 
 export function HowItWorksModal({ open, onClose, stepIdx = 0 }: { open: boolean; onClose: () => void; stepIdx?: number }) {
   useEffect(() => {
@@ -35,7 +36,7 @@ export function HowItWorksModal({ open, onClose, stepIdx = 0 }: { open: boolean;
           <Step n={4} idx={stepIdx} title="Settle" desc={<>The contract reads exactly that round, derives <code>seed = keccak(seedDomain, tag, chainId, contract, id, round, randomness)</code> and picks Heads/Tails by rejection sampling.</>} />
         </div>
         <div className="modal-links">
-          <a className="btn btn-sm" href="https://github.com/Bas3d-Labs/drand-quicknet-evm" target="_blank" rel="noreferrer">
+          <a className="btn btn-sm" href={REPO_URL} target="_blank" rel="noreferrer">
             Registry source ↗
           </a>
           <a className="btn btn-sm" href="https://api.drand.sh/v2/beacons/quicknet/info" target="_blank" rel="noreferrer">
